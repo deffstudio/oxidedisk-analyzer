@@ -1,0 +1,18 @@
+[package]
+name = "oxidedisk-analyzer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.29"
+egui = "0.29"
+egui_extras = "0.29"
+jwalk = "0.8"
+sysinfo = "0.32"
+chrono = "0.4"
+rfd = "0.15"
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
