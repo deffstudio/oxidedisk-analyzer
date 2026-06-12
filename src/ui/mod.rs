@@ -1,8 +1,10 @@
 //! egui panels and shared formatting helpers.
 
 pub mod dashboard;
+pub mod duplicates;
 pub mod file_table;
 pub mod filter_bar;
+pub mod cleanup;
 
 use std::time::SystemTime;
 

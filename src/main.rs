@@ -8,14 +8,27 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod analyzer;
+mod cleanup;
+mod duplicates;
 mod models;
 mod scanner;
 mod ui;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
 
-use models::{DiskInfo, FileMetadata, FilterState, ScanMessage, SortKey};
+use models::{
+    DiskInfo, DupMessage, DuplicateGroup, FileMetadata, FilterState, ScanMessage, SortKey,
+};
+
+/// Which view the central panel shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ViewMode {
+    Files,
+    Duplicates,
+    Cleanup,
+}
 
 fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
@@ -34,11 +47,14 @@ fn main() -> eframe::Result<()> {
 }
 
 struct App {
-    files: Vec<FileMetadata>,
+    /// Master file list, shared with background threads via `Arc` (never mutated
+    /// after a scan completes).
+    files: Arc<Vec<FileMetadata>>,
     /// Indices into `files` after filtering + sorting — what the table renders.
     view: Vec<usize>,
     filter: FilterState,
     sort: (SortKey, bool),
+    view_mode: ViewMode,
 
     rx: Option<Receiver<ScanMessage>>,
     scanning: bool,
@@ -47,21 +63,32 @@ struct App {
     errors: Vec<String>,
     disk: Option<DiskInfo>,
     show_log: bool,
+
+    dup_rx: Option<Receiver<DupMessage>>,
+    finding_dups: bool,
+    /// (files hashed, total candidates) for the current find pass.
+    dup_progress: (usize, usize),
+    dup_groups: Vec<DuplicateGroup>,
 }
 
 impl Default for App {
     fn default() -> Self {
         App {
-            files: Vec::new(),
+            files: Arc::new(Vec::new()),
             view: Vec::new(),
             filter: FilterState::default(),
             sort: (SortKey::Size, false), // largest first by default
+            view_mode: ViewMode::Files,
             rx: None,
             scanning: false,
             progress: (0, 0),
             errors: Vec::new(),
             disk: None,
             show_log: false,
+            dup_rx: None,
+            finding_dups: false,
+            dup_progress: (0, 0),
+            dup_groups: Vec::new(),
         }
     }
 }
@@ -74,18 +101,82 @@ impl App {
         analyzer::sort(&mut self.view, &self.files, key, asc);
     }
 
-    /// Start a fresh scan rooted at `root`.
-    fn start_scan(&mut self, root: PathBuf, ctx: &egui::Context) {
-        self.files.clear();
+    /// Start a fresh scan rooted at `roots`.
+    fn start_scan(&mut self, roots: Vec<PathBuf>, ctx: &egui::Context) {
+        self.files = Arc::new(Vec::new());
         self.view.clear();
         self.errors.clear();
+        self.dup_groups.clear();
+        self.dup_progress = (0, 0);
+        self.view_mode = ViewMode::Files;
         self.progress = (0, 0);
         self.scanning = true;
-        self.disk = disk_for(&root);
+        
+        // Use the first root for disk info if available.
+        if let Some(root) = roots.first() {
+            self.disk = disk_for(root);
+        } else {
+            self.disk = None;
+        }
 
         let (tx, rx) = channel();
         self.rx = Some(rx);
-        scanner::spawn_scan(root, tx, ctx.clone());
+        scanner::spawn_scan(roots, tx, ctx.clone());
+    }
+
+    /// Targeted scan of common temp folders.
+    fn start_temp_cleanup_scan(&mut self, ctx: &egui::Context) {
+        let roots: Vec<PathBuf> = cleanup::get_known_temp_folders()
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        
+        if roots.is_empty() {
+            self.errors.push("No common temp folders found.".to_string());
+            return;
+        }
+
+        self.start_scan(roots, ctx);
+        self.view_mode = ViewMode::Cleanup;
+    }
+
+    /// Kick off duplicate detection over the current file list.
+    fn start_find_dups(&mut self, ctx: &egui::Context) {
+        self.dup_groups.clear();
+        self.dup_progress = (0, 0);
+        self.finding_dups = true;
+
+        let (tx, rx) = channel();
+        self.dup_rx = Some(rx);
+        duplicates::spawn_find(Arc::clone(&self.files), tx, ctx.clone());
+    }
+
+    /// Drain any pending duplicate-finder messages.
+    fn pump_dups(&mut self) {
+        let mut finished = false;
+        if let Some(rx) = &self.dup_rx {
+            for msg in rx.try_iter() {
+                match msg {
+                    DupMessage::Progress { hashed, total } => {
+                        self.dup_progress = (hashed, total);
+                    }
+                    DupMessage::Error(e) => {
+                        if self.errors.len() < 10_000 {
+                            self.errors.push(e);
+                        }
+                    }
+                    DupMessage::Done(groups) => {
+                        self.dup_groups = groups;
+                        finished = true;
+                    }
+                }
+            }
+        }
+        if finished {
+            self.finding_dups = false;
+            self.dup_rx = None;
+            self.view_mode = ViewMode::Duplicates;
+        }
     }
 
     /// Drain any pending scan messages.
@@ -106,7 +197,7 @@ impl App {
                     ScanMessage::Done(files) => {
                         self.progress.0 = files.len();
                         self.progress.1 = files.iter().map(|f| f.size).sum();
-                        self.files = files;
+                        self.files = Arc::new(files);
                         finished = true;
                     }
                 }
@@ -123,6 +214,7 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_scan();
+        self.pump_dups();
 
         egui::TopBottomPanel::top("dashboard").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -131,9 +223,49 @@ impl eframe::App for App {
                     .clicked()
                 {
                     if let Some(root) = rfd::FileDialog::new().pick_folder() {
-                        self.start_scan(root, ctx);
+                        self.start_scan(vec![root], ctx);
                     }
                 }
+
+                if ui
+                    .add_enabled(!self.scanning, egui::Button::new("🧹 Temp Cleanup"))
+                    .clicked()
+                {
+                    self.start_temp_cleanup_scan(ctx);
+                }
+
+                let can_find = !self.files.is_empty() && !self.scanning && !self.finding_dups;
+                if ui
+                    .add_enabled(can_find, egui::Button::new("🔍 Find Duplicates"))
+                    .clicked()
+                {
+                    self.start_find_dups(ctx);
+                }
+
+                if self.finding_dups {
+                    ui.spinner();
+                    ui.label(format!(
+                        "Hashing {}/{}",
+                        self.dup_progress.0, self.dup_progress.1
+                    ));
+                } else if !self.files.is_empty() {
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Files, "Files");
+                    
+                    if !self.dup_groups.is_empty() {
+                        ui.selectable_value(
+                            &mut self.view_mode,
+                            ViewMode::Duplicates,
+                            format!("Duplicates ({})", self.dup_groups.len()),
+                        );
+                    }
+                    
+                    // Always show Cleanup tab if we are in it, or if it's relevant.
+                    // For now, let's just show it if we are in it.
+                    if self.view_mode == ViewMode::Cleanup {
+                        ui.selectable_value(&mut self.view_mode, ViewMode::Cleanup, "Cleanup");
+                    }
+                }
+
                 ui.checkbox(&mut self.show_log, format!("Log ({})", self.errors.len()));
             });
             ui.add_space(4.0);
@@ -178,15 +310,31 @@ impl eframe::App for App {
                 });
                 return;
             }
-            if let Some(key) = ui::file_table::show(ui, &self.files, &self.view, self.sort) {
-                // Toggle direction if the same column was clicked again.
-                let (cur_key, cur_asc) = self.sort;
-                self.sort = if cur_key == key {
-                    (key, !cur_asc)
-                } else {
-                    (key, true)
-                };
-                self.rebuild_view();
+            match self.view_mode {
+                ViewMode::Cleanup => {
+                    if ui::cleanup::show(ui, &self.files, &self.view, |path| {
+                        cleanup::delete_to_trash(path)
+                    }) {
+                        self.files = Arc::new(Vec::new());
+                        self.view.clear();
+                    }
+                }
+                ViewMode::Duplicates => {
+                    ui::duplicates::show(ui, &self.files, &self.dup_groups);
+                }
+                ViewMode::Files => {
+                    if let Some(key) = ui::file_table::show(ui, &self.files, &self.view, self.sort)
+                    {
+                        // Toggle direction if the same column was clicked again.
+                        let (cur_key, cur_asc) = self.sort;
+                        self.sort = if cur_key == key {
+                            (key, !cur_asc)
+                        } else {
+                            (key, true)
+                        };
+                        self.rebuild_view();
+                    }
+                }
             }
         });
     }

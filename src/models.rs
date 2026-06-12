@@ -141,3 +141,30 @@ pub enum ScanMessage {
     Error(String),
     Done(Vec<FileMetadata>),
 }
+
+/// A set of files with identical content (confirmed by full blake3 hash).
+#[derive(Clone, Debug)]
+pub struct DuplicateGroup {
+    pub size: u64,
+    /// Hex of the full-file blake3 hash, shared by all members.
+    pub hash: String,
+    /// Indices into the master file list.
+    pub members: Vec<usize>,
+}
+
+impl DuplicateGroup {
+    /// Bytes that could be reclaimed by keeping a single copy.
+    pub fn wasted(&self) -> u64 {
+        self.size
+            .saturating_mul(self.members.len().saturating_sub(1) as u64)
+    }
+}
+
+/// Messages streamed from the background duplicate-finder thread to the UI.
+#[derive(Debug)]
+pub enum DupMessage {
+    /// `hashed` of `total` candidate files processed so far.
+    Progress { hashed: usize, total: usize },
+    Error(String),
+    Done(Vec<DuplicateGroup>),
+}
