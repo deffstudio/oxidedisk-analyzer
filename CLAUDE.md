@@ -5,9 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project
 
 OxideDisk Analyzer — a single-binary Windows 11 disk-usage analyzer written in Rust with an
-`egui`/`eframe` GUI. Current state is a **vertical slice**: scan a folder/drive, show a disk-capacity
-dashboard, and explore files in a virtualized, sortable/filterable table. Duplicate detection (blake3),
-cleanup (recycle bin / temp folders), and UAC elevation are **deferred** (not yet implemented).
+`egui`/`eframe` GUI. It can scan a folder/drive, show a disk-capacity dashboard, explore files in a
+virtualized sortable/filterable table, detect duplicate files (blake3), clean known temp/junk folders
+(move to Recycle Bin), and elevate to Administrator on demand for protected system folders. The app
+runs unprivileged and only relaunches elevated when the user invokes cleanup that needs it (no
+launch-time admin manifest).
 
 ## Commands
 
@@ -19,17 +21,21 @@ cargo clippy           # lint
 cargo fmt              # format
 ```
 
-There are no tests yet. When adding them, `cargo test`; a single test: `cargo test <name>`.
+`cargo test` runs the suite (currently the blake3 hashing tests in `src/duplicates.rs`); a single
+test: `cargo test <name>`.
 
 ## Architecture
 
-The app is **single-threaded UI + a background scan thread**, communicating over an `mpsc` channel.
-This is the central design constraint: the egui loop must never block, so all filesystem work happens
-off-thread and results stream back as messages.
+The app is **single-threaded UI + background worker threads**, each communicating over its own `mpsc`
+channel. This is the central design constraint: the egui loop must never block, so all filesystem and
+hashing work happens off-thread and results stream back as messages drained per frame.
 
 **Data flow:** `main.rs` (`App`) owns the state and orchestrates everything → `scanner::spawn_scan`
 walks the tree on a worker thread, sending `ScanMessage`s → `App::pump_scan` drains them each frame →
-on `Done`, `analyzer` filters + sorts → the `ui` panels render.
+on `Done`, `analyzer` filters + sorts → the `ui` panels render. Duplicate detection
+(`duplicates::spawn_find`) runs the same pattern on its own thread/channel (`DupMessage` / `pump_dups`).
+The master `files` list is held in an `Arc<Vec<FileMetadata>>` so it can be shared cheaply with the
+dup-finder thread without cloning.
 
 - `src/models.rs` — shared types: `FileMetadata`, `DiskInfo`, `Category` (extension→category map),
   `SortKey`, `FilterState`, and the `ScanMessage` enum (`Progress` / `Error` / `Done`) that defines
@@ -40,6 +46,17 @@ on `Done`, `analyzer` filters + sorts → the `ui` panels render.
 - `src/analyzer.rs` — operates on **indices into the master `Vec<FileMetadata>`, never mutating or
   cloning it.** `apply()` returns matching indices; `sort()` reorders them in place (both use rayon's
   `par_sort_unstable_by`).
+- `src/duplicates.rs` — `spawn_find(files, tx, ctx)` hashes on its own thread via a **3-stage funnel**
+  (group by size → blake3 of first 16 KB prefix → full blake3 confirm), processing candidates in
+  chunks of 256 with rayon and reporting `DupMessage::Progress` per chunk. **IO errors are sent as
+  `DupMessage::Error` and the file is dropped — never panic.** Has unit tests (`cargo test`).
+- `src/cleanup.rs` — `get_known_temp_folders()` returns the temp/cache locations that exist on this
+  machine; `delete_to_trash()` moves a path to the Recycle Bin via `trash` (recoverable, not a hard
+  delete). The targeted temp scan reuses `scanner::spawn_scan` over these roots.
+- `src/elevation.rs` — on-demand UAC. `is_elevated()` checks the process token; `relaunch_as_admin()`
+  re-launches the same exe with the `runas` verb (`ShellExecuteW`) and the `CLEANUP_FLAG` so the
+  elevated instance jumps straight to the cleanup view, then the unprivileged instance closes. Windows
+  bits are `#[cfg(windows)]` with a stub fallback. Uses `windows-sys` (a `cfg(windows)` dependency).
 - `src/ui/` — panels are **free functions that borrow only the fields they need** (not `&mut App`),
   to avoid borrow-checker conflicts across simultaneously-open panels. `mod.rs` holds shared
   formatters (`human_bytes`, `format_time`). Panels signal changes via return values

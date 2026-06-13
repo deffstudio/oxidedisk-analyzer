@@ -10,6 +10,7 @@
 mod analyzer;
 mod cleanup;
 mod duplicates;
+mod elevation;
 mod models;
 mod scanner;
 mod ui;
@@ -69,6 +70,12 @@ struct App {
     /// (files hashed, total candidates) for the current find pass.
     dup_progress: (usize, usize),
     dup_groups: Vec<DuplicateGroup>,
+
+    /// Whether this process is running with administrator rights.
+    elevated: bool,
+    /// Set when launched elevated with `--cleanup`: auto-open temp cleanup on
+    /// the first frame.
+    pending_cleanup: bool,
 }
 
 impl Default for App {
@@ -89,6 +96,8 @@ impl Default for App {
             finding_dups: false,
             dup_progress: (0, 0),
             dup_groups: Vec::new(),
+            elevated: elevation::is_elevated(),
+            pending_cleanup: std::env::args().any(|a| a == elevation::CLEANUP_FLAG),
         }
     }
 }
@@ -216,6 +225,12 @@ impl eframe::App for App {
         self.pump_scan();
         self.pump_dups();
 
+        // Launched elevated with `--cleanup`: jump straight to the temp scan.
+        if self.pending_cleanup {
+            self.pending_cleanup = false;
+            self.start_temp_cleanup_scan(ctx);
+        }
+
         egui::TopBottomPanel::top("dashboard").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui
@@ -269,7 +284,14 @@ impl eframe::App for App {
                 ui.checkbox(&mut self.show_log, format!("Log ({})", self.errors.len()));
             });
             ui.add_space(4.0);
-            ui::dashboard::show(ui, &self.disk, self.scanning, self.progress, self.view.len());
+            ui::dashboard::show(
+                ui,
+                &self.disk,
+                self.scanning,
+                self.progress,
+                self.view.len(),
+                self.elevated,
+            );
         });
 
         egui::SidePanel::left("filters")
@@ -312,11 +334,21 @@ impl eframe::App for App {
             }
             match self.view_mode {
                 ViewMode::Cleanup => {
-                    if ui::cleanup::show(ui, &self.files, &self.view, |path| {
+                    match ui::cleanup::show(ui, &self.files, &self.view, self.elevated, |path| {
                         cleanup::delete_to_trash(path)
                     }) {
-                        self.files = Arc::new(Vec::new());
-                        self.view.clear();
+                        ui::cleanup::CleanupAction::Cleaned => {
+                            self.files = Arc::new(Vec::new());
+                            self.view.clear();
+                        }
+                        ui::cleanup::CleanupAction::Elevate => {
+                            match elevation::relaunch_as_admin(&[elevation::CLEANUP_FLAG]) {
+                                // Elevated instance launched — hand off and quit.
+                                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                                Err(e) => self.errors.push(e),
+                            }
+                        }
+                        ui::cleanup::CleanupAction::None => {}
                     }
                 }
                 ViewMode::Duplicates => {

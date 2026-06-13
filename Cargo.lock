@@ -2432,6 +2432,7 @@ dependencies = [
  "rfd",
  "sysinfo",
  "trash",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

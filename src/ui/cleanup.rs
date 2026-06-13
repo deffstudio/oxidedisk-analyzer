@@ -4,13 +4,26 @@ use std::path::Path;
 use crate::models::FileMetadata;
 use crate::ui::human_bytes;
 
+/// What the cleanup panel is asking the caller to do this frame.
+#[derive(Default)]
+pub enum CleanupAction {
+    /// Nothing requested.
+    #[default]
+    None,
+    /// Files were moved to the Recycle Bin; the caller should clear the scan.
+    Cleaned,
+    /// The user asked to relaunch elevated to reach protected folders.
+    Elevate,
+}
+
 pub fn show(
     ui: &mut egui::Ui,
     files: &[FileMetadata],
     view: &[usize],
+    elevated: bool,
     delete_fn: impl Fn(&Path) -> Result<(), String>,
-) -> bool {
-    let mut cleaned = false;
+) -> CleanupAction {
+    let mut action = CleanupAction::None;
     let total_size: u64 = view.iter().map(|&i| files[i].size).sum();
 
     ui.vertical(|ui| {
@@ -28,10 +41,28 @@ pub fn show(
                             eprintln!("{}", e);
                         }
                     }
-                    cleaned = true;
+                    action = CleanupAction::Cleaned;
                 }
             });
         });
+
+        // System temp folders (Windows\Temp, Update cache, Prefetch) need admin
+        // rights. Offer on-demand elevation rather than failing silently.
+        if !elevated {
+            ui.horizontal(|ui| {
+                if ui
+                    .button("🛡 Run as Administrator")
+                    .on_hover_text(
+                        "Some system folders (Windows\\Temp, Update cache, Prefetch) \
+                         require administrator rights. This relaunches OxideDisk elevated.",
+                    )
+                    .clicked()
+                {
+                    action = CleanupAction::Elevate;
+                }
+                ui.weak("— needed to clean protected system folders.");
+            });
+        }
 
         ui.separator();
 
@@ -55,5 +86,5 @@ pub fn show(
         }
     });
 
-    cleaned
+    action
 }

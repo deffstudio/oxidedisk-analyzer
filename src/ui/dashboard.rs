@@ -10,9 +10,14 @@ pub fn show(
     scanning: bool,
     progress: (usize, u64),
     shown: usize,
+    elevated: bool,
 ) {
     ui.horizontal(|ui| {
         ui.heading("OxideDisk Analyzer");
+        if elevated {
+            ui.label("🛡 Administrator")
+                .on_hover_text("Running elevated — protected system folders can be cleaned.");
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if scanning {
                 ui.spinner();
