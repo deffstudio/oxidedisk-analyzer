@@ -1,0 +1,70 @@
+name: Release
+
+# Build a portable Windows binary and publish it to GitHub Releases whenever a
+# version tag (v*) is pushed. `workflow_dispatch` allows a manual dry-run build
+# (it builds + packages + uploads as a prerelease draft you can delete).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # required to create the GitHub Release
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable, MSVC)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package artifacts
+        id: package
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '[/\\]', '-'
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          $exe = "target/release/oxidedisk-analyzer.exe"
+          Copy-Item $exe $dist
+          Copy-Item README.md $dist
+          Copy-Item LICENSE  $dist
+
+          $zip = "oxidedisk-analyzer-$version-windows-x64.zip"
+          Compress-Archive -Path "$dist/*" -DestinationPath $zip -Force
+
+          # SHA-256 checksums for the portable exe and the zip.
+          $sums = "SHA256SUMS.txt"
+          Remove-Item $sums -ErrorAction SilentlyContinue
+          foreach ($f in @($exe, $zip)) {
+            $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+            $name = Split-Path $f -Leaf
+            "$h  $name" | Out-File -FilePath $sums -Append -Encoding ascii
+          }
+
+          "zip=$zip"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "exe=$exe"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "sums=$sums" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Get-Content $sums
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # On workflow_dispatch (no tag) publish as a deletable draft.
+          draft: ${{ github.ref_type != 'tag' }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.package.outputs.exe }}
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.sums }}
