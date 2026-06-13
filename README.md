@@ -37,7 +37,36 @@ table alongside a live disk-capacity dashboard.
   by aggregating the flat scan into a directory tree. Click a folder tile to zoom in, breadcrumbs or
   **⬆ Up** to go back.
 
+## Install
+
+Grab the latest portable build from the
+[**Releases**](https://github.com/deffstudio/oxidedisk-analyzer/releases) page:
+
+1. Download `oxidedisk-analyzer-<version>-windows-x64.zip` (or the bare
+   `oxidedisk-analyzer.exe`).
+2. Unzip anywhere and double-click the `.exe` — it's a single portable binary, no installer and no
+   admin rights needed to run. It only prompts for elevation if you ask it to clean protected system
+   folders.
+
+### "Windows protected your PC" (SmartScreen)
+
+The binary is **not code-signed**, so Windows SmartScreen may show a *"Windows protected your PC"*
+warning the first time you run it. To proceed: click **More info → Run anyway**. (Code signing
+requires a paid certificate; this is a free, open-source personal project.)
+
+### Verify your download (optional)
+
+Each release ships a `SHA256SUMS.txt`. Confirm your file matches:
+
+```powershell
+Get-FileHash .\oxidedisk-analyzer.exe -Algorithm SHA256
+```
+
+Compare the printed hash against the corresponding line in `SHA256SUMS.txt`.
+
 ## Requirements
+
+Only needed to **build from source** (the released `.exe` has no prerequisites):
 
 - **Rust 1.85+** (the dependency tree uses edition-2024 crates). Update with `rustup update stable`.
 - **Windows** with the MSVC toolchain.

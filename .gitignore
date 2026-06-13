@@ -1,1 +1,18 @@
+# Rust build output
 /target
+
+# Release staging / artifacts
+/dist
+/*.zip
+/*.exe
+*.pdb
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store

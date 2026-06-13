@@ -2,6 +2,13 @@
 name = "oxidedisk-analyzer"
 version = "0.1.0"
 edition = "2021"
+description = "A fast, single-binary Windows 11 disk-usage analyzer (egui): scan, dashboard, file table, duplicate detection, temp cleanup, and tree map."
+license = "MIT"
+repository = "https://github.com/deffstudio/oxidedisk-analyzer"
+authors = ["deffstudio"]
+readme = "README.md"
+keywords = ["disk", "storage", "analyzer", "duplicates", "egui"]
+categories = ["gui", "filesystem"]
 
 [dependencies]
 eframe = { version = "0.29", features = ["persistence"] }
@@ -24,6 +31,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 opt-level = 3

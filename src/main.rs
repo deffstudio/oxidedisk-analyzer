@@ -34,11 +34,18 @@ enum ViewMode {
 }
 
 fn main() -> eframe::Result<()> {
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1100.0, 700.0])
+        .with_min_inner_size([720.0, 480.0])
+        .with_title("OxideDisk Analyzer");
+    // Window/taskbar icon, decoded from the embedded PNG. The exe-file icon
+    // (Explorer) is set separately at build time via build.rs.
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")) {
+        viewport = viewport.with_icon(Arc::new(icon));
+    }
+
     let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1100.0, 700.0])
-            .with_min_inner_size([720.0, 480.0])
-            .with_title("OxideDisk Analyzer"),
+        viewport,
         ..Default::default()
     };
 
