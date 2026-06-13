@@ -67,7 +67,10 @@ dup-finder thread without cloning.
   whether to `rebuild_view`.
 - `src/main.rs` — `App` holds `files` (master list) + `view` (filtered/sorted index list that the
   table renders). `rebuild_view()` is the single recompute path (apply filter, then sort); call it
-  after any filter or sort change.
+  after any filter or sort change. `App::new(cc)` restores the persisted `Settings` (filter, sort,
+  last root, log toggle) and `App::save` writes them back via eframe storage (`eframe` is built with
+  the `persistence` feature; `serde` derives live on the persisted `models` types). Window geometry
+  is persisted automatically by eframe.
 
 ## Conventions / invariants
 

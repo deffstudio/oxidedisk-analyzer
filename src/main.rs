@@ -20,7 +20,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
 use models::{
-    DiskInfo, DupMessage, DuplicateGroup, FileMetadata, FilterState, ScanMessage, SortKey,
+    DiskInfo, DupMessage, DuplicateGroup, FileMetadata, FilterState, ScanMessage, Settings, SortKey,
 };
 
 /// Which view the central panel shows.
@@ -43,7 +43,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "OxideDisk Analyzer",
         native_options,
-        Box::new(|_cc| Ok(Box::<App>::default())),
+        Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
 }
 
@@ -73,6 +73,8 @@ struct App {
 
     /// Whether the cleanup dry-run confirmation dialog is open.
     confirm_cleanup: bool,
+    /// Last directory scanned — persisted, and used as the picker's start dir.
+    last_root: Option<PathBuf>,
     /// Whether this process is running with administrator rights.
     elevated: bool,
     /// Set when launched elevated with `--cleanup`: auto-open temp cleanup on
@@ -99,6 +101,7 @@ impl Default for App {
             dup_progress: (0, 0),
             dup_groups: Vec::new(),
             confirm_cleanup: false,
+            last_root: None,
             elevated: elevation::is_elevated(),
             pending_cleanup: std::env::args().any(|a| a == elevation::CLEANUP_FLAG),
         }
@@ -106,6 +109,33 @@ impl Default for App {
 }
 
 impl App {
+    /// Build the app, restoring persisted settings from eframe storage.
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut app = App::default();
+        if let Some(storage) = cc.storage {
+            if let Some(s) = eframe::get_value::<Settings>(storage, eframe::APP_KEY) {
+                app.filter = s.filter;
+                if let Some(key) = s.sort_key {
+                    app.sort = (key, s.sort_asc);
+                }
+                app.show_log = s.show_log;
+                app.last_root = s.last_root;
+            }
+        }
+        app
+    }
+
+    /// Snapshot the current preferences for persistence.
+    fn settings(&self) -> Settings {
+        Settings {
+            last_root: self.last_root.clone(),
+            sort_key: Some(self.sort.0),
+            sort_asc: self.sort.1,
+            filter: self.filter.clone(),
+            show_log: self.show_log,
+        }
+    }
+
     /// Recompute the visible index list from the current filter + sort.
     fn rebuild_view(&mut self) {
         self.view = analyzer::apply(&self.files, &self.filter);
@@ -225,6 +255,11 @@ impl App {
 }
 
 impl eframe::App for App {
+    /// Persist user preferences (eframe also persists window geometry).
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, &self.settings());
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_scan();
         self.pump_dups();
@@ -241,7 +276,12 @@ impl eframe::App for App {
                     .add_enabled(!self.scanning, egui::Button::new("📁 Select folder"))
                     .clicked()
                 {
-                    if let Some(root) = rfd::FileDialog::new().pick_folder() {
+                    let mut dialog = rfd::FileDialog::new();
+                    if let Some(root) = &self.last_root {
+                        dialog = dialog.set_directory(root);
+                    }
+                    if let Some(root) = dialog.pick_folder() {
+                        self.last_root = Some(root.clone());
                         self.start_scan(vec![root], ctx);
                     }
                 }

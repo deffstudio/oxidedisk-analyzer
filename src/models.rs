@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use serde::{Deserialize, Serialize};
+
 /// Metadata captured for a single file during a scan.
 #[derive(Clone, Debug)]
 pub struct FileMetadata {
@@ -52,7 +54,7 @@ impl DiskInfo {
 }
 
 /// Coarse file categories used by the quick filters.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Category {
     Images,
     Video,
@@ -103,7 +105,7 @@ impl Category {
 }
 
 /// Column the file table is sorted by.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SortKey {
     Name,
     Size,
@@ -111,7 +113,7 @@ pub enum SortKey {
 }
 
 /// Active filtering state, mutated by the side panel.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FilterState {
     /// Minimum size in bytes (0 = no minimum).
     pub min_size: u64,
@@ -132,6 +134,22 @@ impl Default for FilterState {
             top_n: None,
         }
     }
+}
+
+/// User settings persisted across runs via eframe's storage. Window geometry is
+/// handled separately by eframe (`persist_window`); this covers app-level prefs.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Last directory that was scanned — used as the file picker's start dir.
+    pub last_root: Option<PathBuf>,
+    /// Persisted sort column + ascending flag.
+    pub sort_key: Option<SortKey>,
+    pub sort_asc: bool,
+    /// Persisted filter presets.
+    pub filter: FilterState,
+    /// Whether the scan log panel was open.
+    pub show_log: bool,
 }
 
 /// Messages streamed from the background scan thread to the UI.

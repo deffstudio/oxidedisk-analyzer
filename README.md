@@ -30,6 +30,9 @@ table alongside a live disk-capacity dashboard.
 - **On-demand elevation** — runs unprivileged; when cleaning protected system folders needs
   Administrator rights, a **🛡 Run as Administrator** button relaunches the binary elevated (single
   UAC prompt) straight into the cleanup view. No launch-time admin manifest.
+- **Persisted settings** — window geometry, the last scanned folder (used as the picker's start
+  directory), sort column, filter presets, and the log toggle are saved between runs via eframe's
+  storage.
 
 ## Requirements
 
@@ -79,8 +82,7 @@ table renders. See [`CLAUDE.md`](CLAUDE.md) for deeper notes.
 
 ## Roadmap
 
-The core slice (scan, dashboard, table, duplicates, cleanup with dry-run + blacklist, elevation) is
-complete. Possible next steps:
+The core slice (scan, dashboard, table, duplicates, cleanup with dry-run + blacklist, elevation,
+persisted settings) is complete. Possible next steps:
 
-- **Persisted settings** — remember the last scanned root, window size, and filter presets.
 - **Tree map view** — a visual size breakdown by folder alongside the flat table.
