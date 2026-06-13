@@ -56,6 +56,10 @@ dup-finder thread without cloning.
   `is_protected()` form a hardcoded critical-path blacklist (System32/SysWOW64/WinSxS/Program Files)
   the cleanup UI always skips. The **🗑 Clean All** button opens a dry-run confirmation dialog
   (`ui::cleanup::confirm_modal`) — nothing is recycled until the user confirms.
+- `src/treemap.rs` — `build()` aggregates the flat `files` list into a directory `Node` tree (sizes
+  summed up to the common-ancestor root); `squarify()` lays a node's children into proportional
+  rectangles (squarified treemap, plain-`f64` math so it's unit-tested without egui). Built lazily
+  the first time the TreeMap view is shown after a scan and cached on `App` (`tree` / `tree_zoom`).
 - `src/elevation.rs` — on-demand UAC. `is_elevated()` checks the process token; `relaunch_as_admin()`
   re-launches the same exe with the `runas` verb (`ShellExecuteW`) and the `CLEANUP_FLAG` so the
   elevated instance jumps straight to the cleanup view, then the unprivileged instance closes. Windows

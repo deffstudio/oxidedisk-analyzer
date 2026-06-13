@@ -5,6 +5,7 @@ pub mod duplicates;
 pub mod file_table;
 pub mod filter_bar;
 pub mod cleanup;
+pub mod treemap;
 
 use std::time::SystemTime;
 

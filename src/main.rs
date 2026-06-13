@@ -13,6 +13,7 @@ mod duplicates;
 mod elevation;
 mod models;
 mod scanner;
+mod treemap;
 mod ui;
 
 use std::path::{Path, PathBuf};
@@ -29,6 +30,7 @@ enum ViewMode {
     Files,
     Duplicates,
     Cleanup,
+    TreeMap,
 }
 
 fn main() -> eframe::Result<()> {
@@ -75,6 +77,10 @@ struct App {
     confirm_cleanup: bool,
     /// Last directory scanned — persisted, and used as the picker's start dir.
     last_root: Option<PathBuf>,
+    /// Aggregated folder-size tree for the treemap, built lazily from `files`.
+    tree: Option<treemap::Node>,
+    /// Index path of the folder the treemap is currently zoomed into.
+    tree_zoom: Vec<usize>,
     /// Whether this process is running with administrator rights.
     elevated: bool,
     /// Set when launched elevated with `--cleanup`: auto-open temp cleanup on
@@ -102,6 +108,8 @@ impl Default for App {
             dup_groups: Vec::new(),
             confirm_cleanup: false,
             last_root: None,
+            tree: None,
+            tree_zoom: Vec::new(),
             elevated: elevation::is_elevated(),
             pending_cleanup: std::env::args().any(|a| a == elevation::CLEANUP_FLAG),
         }
@@ -151,6 +159,8 @@ impl App {
         self.dup_groups.clear();
         self.dup_progress = (0, 0);
         self.confirm_cleanup = false;
+        self.tree = None;
+        self.tree_zoom.clear();
         self.view_mode = ViewMode::Files;
         self.progress = (0, 0);
         self.scanning = true;
@@ -309,7 +319,8 @@ impl eframe::App for App {
                     ));
                 } else if !self.files.is_empty() {
                     ui.selectable_value(&mut self.view_mode, ViewMode::Files, "Files");
-                    
+                    ui.selectable_value(&mut self.view_mode, ViewMode::TreeMap, "🗺 Tree Map");
+
                     if !self.dup_groups.is_empty() {
                         ui.selectable_value(
                             &mut self.view_mode,
@@ -398,6 +409,22 @@ impl eframe::App for App {
                             }
                         }
                         ui::cleanup::CleanupAction::None => {}
+                    }
+                }
+                ViewMode::TreeMap => {
+                    // Build the size tree on first view after a scan (dirs ≪ files,
+                    // so this is cheap relative to the scan itself).
+                    if self.tree.is_none() {
+                        self.tree = treemap::build(&self.files);
+                        self.tree_zoom.clear();
+                    }
+                    match &self.tree {
+                        Some(root) => ui::treemap::show(ui, root, &mut self.tree_zoom),
+                        None => {
+                            ui.centered_and_justified(|ui| {
+                                ui.label("No folders to map.");
+                            });
+                        }
                     }
                 }
                 ViewMode::Duplicates => {
