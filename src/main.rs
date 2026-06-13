@@ -84,6 +84,12 @@ struct App {
     confirm_cleanup: bool,
     /// Last directory scanned — persisted, and used as the picker's start dir.
     last_root: Option<PathBuf>,
+    /// Root(s) of the most recent scan, so Refresh can re-run it without
+    /// re-picking. Covers both folder scans and the multi-root temp scan.
+    last_scan_roots: Vec<PathBuf>,
+    /// Whether the most recent scan was a temp-cleanup scan (so Refresh restores
+    /// the Cleanup view).
+    last_scan_cleanup: bool,
     /// Aggregated folder-size tree for the treemap, built lazily from `files`.
     tree: Option<treemap::Node>,
     /// Index path of the folder the treemap is currently zoomed into.
@@ -115,6 +121,8 @@ impl Default for App {
             dup_groups: Vec::new(),
             confirm_cleanup: false,
             last_root: None,
+            last_scan_roots: Vec::new(),
+            last_scan_cleanup: false,
             tree: None,
             tree_zoom: Vec::new(),
             elevated: elevation::is_elevated(),
@@ -136,6 +144,11 @@ impl App {
                 app.show_log = s.show_log;
                 app.last_root = s.last_root;
             }
+        }
+        // Seed Refresh with the persisted folder so it can re-scan on a fresh
+        // launch (before any pick this run).
+        if let Some(root) = &app.last_root {
+            app.last_scan_roots = vec![root.clone()];
         }
         app
     }
@@ -171,7 +184,11 @@ impl App {
         self.view_mode = ViewMode::Files;
         self.progress = (0, 0);
         self.scanning = true;
-        
+        // Remember the roots so Refresh can re-run this exact scan. Default to a
+        // folder scan; the temp-cleanup path flips the flag after calling us.
+        self.last_scan_roots = roots.clone();
+        self.last_scan_cleanup = false;
+
         // Use the first root for disk info if available.
         if let Some(root) = roots.first() {
             self.disk = disk_for(root);
@@ -197,7 +214,24 @@ impl App {
         }
 
         self.start_scan(roots, ctx);
+        self.last_scan_cleanup = true;
         self.view_mode = ViewMode::Cleanup;
+    }
+
+    /// Re-run the most recent scan over the same root(s) — used by the Refresh
+    /// button so the table reflects files added/deleted since the last scan
+    /// without re-picking the folder.
+    fn refresh_scan(&mut self, ctx: &egui::Context) {
+        if self.last_scan_roots.is_empty() {
+            return;
+        }
+        let roots = self.last_scan_roots.clone();
+        let was_cleanup = self.last_scan_cleanup;
+        self.start_scan(roots, ctx);
+        if was_cleanup {
+            self.last_scan_cleanup = true;
+            self.view_mode = ViewMode::Cleanup;
+        }
     }
 
     /// Kick off duplicate detection over the current file list.
@@ -301,6 +335,17 @@ impl eframe::App for App {
                         self.last_root = Some(root.clone());
                         self.start_scan(vec![root], ctx);
                     }
+                }
+
+                // Re-scan the same root(s) so the results reflect files that were
+                // added or deleted since the last scan.
+                let can_refresh =
+                    !self.last_scan_roots.is_empty() && !self.scanning && !self.finding_dups;
+                let refresh = ui
+                    .add_enabled(can_refresh, egui::Button::new("🔄 Refresh"))
+                    .on_hover_text(refresh_hint(&self.last_scan_roots, self.last_scan_cleanup));
+                if refresh.clicked() {
+                    self.refresh_scan(ctx);
                 }
 
                 if ui
@@ -475,4 +520,17 @@ fn disk_for(root: &Path) -> Option<DiskInfo> {
         }
     }
     best
+}
+
+/// Tooltip for the Refresh button describing what it will re-scan.
+fn refresh_hint(roots: &[PathBuf], cleanup: bool) -> String {
+    if roots.is_empty() {
+        "Scan a folder first".to_string()
+    } else if cleanup {
+        "Re-scan the temp/junk folders".to_string()
+    } else if roots.len() == 1 {
+        format!("Re-scan {}", roots[0].display())
+    } else {
+        format!("Re-scan {} locations", roots.len())
+    }
 }
