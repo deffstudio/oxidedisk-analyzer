@@ -71,6 +71,8 @@ struct App {
     dup_progress: (usize, usize),
     dup_groups: Vec<DuplicateGroup>,
 
+    /// Whether the cleanup dry-run confirmation dialog is open.
+    confirm_cleanup: bool,
     /// Whether this process is running with administrator rights.
     elevated: bool,
     /// Set when launched elevated with `--cleanup`: auto-open temp cleanup on
@@ -96,6 +98,7 @@ impl Default for App {
             finding_dups: false,
             dup_progress: (0, 0),
             dup_groups: Vec::new(),
+            confirm_cleanup: false,
             elevated: elevation::is_elevated(),
             pending_cleanup: std::env::args().any(|a| a == elevation::CLEANUP_FLAG),
         }
@@ -117,6 +120,7 @@ impl App {
         self.errors.clear();
         self.dup_groups.clear();
         self.dup_progress = (0, 0);
+        self.confirm_cleanup = false;
         self.view_mode = ViewMode::Files;
         self.progress = (0, 0);
         self.scanning = true;
@@ -334,9 +338,14 @@ impl eframe::App for App {
             }
             match self.view_mode {
                 ViewMode::Cleanup => {
-                    match ui::cleanup::show(ui, &self.files, &self.view, self.elevated, |path| {
-                        cleanup::delete_to_trash(path)
-                    }) {
+                    match ui::cleanup::show(
+                        ui,
+                        &self.files,
+                        &self.view,
+                        self.elevated,
+                        &mut self.confirm_cleanup,
+                        |path| cleanup::delete_to_trash(path),
+                    ) {
                         ui::cleanup::CleanupAction::Cleaned => {
                             self.files = Arc::new(Vec::new());
                             self.view.clear();

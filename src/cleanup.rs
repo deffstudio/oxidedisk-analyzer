@@ -117,7 +117,52 @@ pub fn get_known_temp_folders() -> Vec<TempFolder> {
     folders
 }
 
+/// Critical locations that must never be touched by cleanup, even if a temp
+/// scan somehow turns up a path inside them. Resolved from the environment so
+/// they're correct regardless of the Windows drive/locale.
+pub fn protected_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(sr) = std::env::var("SystemRoot") {
+        let win = PathBuf::from(sr);
+        roots.push(win.join("System32"));
+        roots.push(win.join("SysWOW64"));
+        roots.push(win.join("WinSxS"));
+    }
+    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
+        if let Ok(p) = std::env::var(var) {
+            roots.push(PathBuf::from(p));
+        }
+    }
+    roots
+}
+
+/// Is `path` inside one of the protected roots? Comparison is case-insensitive
+/// with a path-separator boundary so `C:\Windows\System32Foo` does not match
+/// `C:\Windows\System32`.
+pub fn is_protected(path: &Path, roots: &[PathBuf]) -> bool {
+    let p = path.to_string_lossy().to_lowercase();
+    roots.iter().any(|root| {
+        let r = root.to_string_lossy().to_lowercase();
+        p == r || p.starts_with(&format!("{r}\\"))
+    })
+}
+
 /// Move a file or directory to the Recycle Bin.
 pub fn delete_to_trash(path: &Path) -> Result<(), String> {
     trash::delete(path).map_err(|e| format!("Failed to recycle {}: {}", path.display(), e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protected_matches_subpaths_case_insensitively_with_boundary() {
+        let roots = vec![PathBuf::from(r"C:\Windows\System32")];
+        assert!(is_protected(Path::new(r"C:\Windows\System32"), &roots));
+        assert!(is_protected(Path::new(r"c:\windows\system32\drivers\etc\hosts"), &roots));
+        // Boundary: a sibling dir that merely shares the prefix is not protected.
+        assert!(!is_protected(Path::new(r"C:\Windows\System32Foo\x"), &roots));
+        assert!(!is_protected(Path::new(r"C:\Windows\Temp\x"), &roots));
+    }
 }

@@ -24,7 +24,9 @@ table alongside a live disk-capacity dashboard.
   per-set and total reclaimable-space figures.
 - **Temp cleanup** — scans known Windows junk locations (User/System Temp, Update cache, Prefetch,
   thumbnail and browser caches) and moves selected files to the Recycle Bin via
-  [`trash`](https://crates.io/crates/trash) — recoverable, never a hard delete.
+  [`trash`](https://crates.io/crates/trash) — recoverable, never a hard delete. A **dry-run
+  confirmation** dialog summarizes what will be moved before anything is deleted, and a hardcoded
+  blacklist (System32, SysWOW64, WinSxS, Program Files) is always skipped.
 - **On-demand elevation** — runs unprivileged; when cleaning protected system folders needs
   Administrator rights, a **🛡 Run as Administrator** button relaunches the binary elevated (single
   UAC prompt) straight into the cleanup view. No launch-time admin manifest.
@@ -77,10 +79,8 @@ table renders. See [`CLAUDE.md`](CLAUDE.md) for deeper notes.
 
 ## Roadmap
 
-The core slice (scan, dashboard, table, duplicates, cleanup, elevation) is complete. Possible next
-steps:
+The core slice (scan, dashboard, table, duplicates, cleanup with dry-run + blacklist, elevation) is
+complete. Possible next steps:
 
-- **Safer cleanup** — a dry-run confirmation modal and a hardcoded System32/critical-path blacklist
-  before any delete.
 - **Persisted settings** — remember the last scanned root, window size, and filter presets.
 - **Tree map view** — a visual size breakdown by folder alongside the flat table.

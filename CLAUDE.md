@@ -52,7 +52,10 @@ dup-finder thread without cloning.
   `DupMessage::Error` and the file is dropped — never panic.** Has unit tests (`cargo test`).
 - `src/cleanup.rs` — `get_known_temp_folders()` returns the temp/cache locations that exist on this
   machine; `delete_to_trash()` moves a path to the Recycle Bin via `trash` (recoverable, not a hard
-  delete). The targeted temp scan reuses `scanner::spawn_scan` over these roots.
+  delete). The targeted temp scan reuses `scanner::spawn_scan` over these roots. `protected_roots()` +
+  `is_protected()` form a hardcoded critical-path blacklist (System32/SysWOW64/WinSxS/Program Files)
+  the cleanup UI always skips. The **🗑 Clean All** button opens a dry-run confirmation dialog
+  (`ui::cleanup::confirm_modal`) — nothing is recycled until the user confirms.
 - `src/elevation.rs` — on-demand UAC. `is_elevated()` checks the process token; `relaunch_as_admin()`
   re-launches the same exe with the `runas` verb (`ShellExecuteW`) and the `CLEANUP_FLAG` so the
   elevated instance jumps straight to the cleanup view, then the unprivileged instance closes. Windows
