@@ -33,6 +33,9 @@ table alongside a live disk-capacity dashboard.
 - **Persisted settings** — window geometry, the last scanned folder (used as the picker's start
   directory), sort column, filter presets, and the log toggle are saved between runs via eframe's
   storage.
+- **Tree map** — a size-proportional, drill-down view of the folder tree (squarified treemap), built
+  by aggregating the flat scan into a directory tree. Click a folder tile to zoom in, breadcrumbs or
+  **⬆ Up** to go back.
 
 ## Requirements
 
@@ -55,10 +58,12 @@ In release builds the console window is hidden; debug builds keep it for logging
 3. Use the left **Filters** panel and click table headers to drill into the data.
 4. Click **🔍 Find Duplicates**, then switch to the **Duplicates** view to browse content-identical
    sets and how much space they waste.
-5. Click **🧹 Temp Cleanup** to scan known junk folders; review the list and **🗑 Clean All** to move
+5. Switch to **🗺 Tree Map** for a size-proportional view; click a folder tile to drill in, **⬆ Up**
+   or the breadcrumbs to go back.
+6. Click **🧹 Temp Cleanup** to scan known junk folders; review the list and **🗑 Clean All** to move
    them to the Recycle Bin. If protected system folders need admin rights, click
    **🛡 Run as Administrator** to relaunch elevated.
-6. Toggle the **Log** checkbox to inspect any files that couldn't be read.
+7. Toggle the **Log** checkbox to inspect any files that couldn't be read.
 
 ## Architecture
 
@@ -73,7 +78,8 @@ over its own `mpsc` channel.
 | `src/duplicates.rs` | Background blake3 dedup funnel (size → prefix → full hash) streaming `DupMessage`s |
 | `src/cleanup.rs` | Known temp-folder discovery + move-to-Recycle-Bin (`trash`) |
 | `src/elevation.rs` | UAC: detect admin token, relaunch elevated on demand (`windows-sys`, `ShellExecuteW` `runas`) |
-| `src/ui/` | egui panels: `dashboard`, `filter_bar`, `file_table`, `duplicates`, `cleanup` + formatters |
+| `src/treemap.rs` | Aggregate flat files into a folder-size tree + squarified treemap layout (unit-tested) |
+| `src/ui/` | egui panels: `dashboard`, `filter_bar`, `file_table`, `duplicates`, `cleanup`, `treemap` + formatters |
 | `src/main.rs` | `App` state, channel pumping, panel orchestration |
 
 The master file list is held in an `Arc<Vec<FileMetadata>>` (shared cheaply with worker threads) and
@@ -82,7 +88,8 @@ table renders. See [`CLAUDE.md`](CLAUDE.md) for deeper notes.
 
 ## Roadmap
 
-The core slice (scan, dashboard, table, duplicates, cleanup with dry-run + blacklist, elevation,
-persisted settings) is complete. Possible next steps:
+The planned feature set (scan, dashboard, table, duplicates, cleanup with dry-run + blacklist,
+elevation, persisted settings, tree map) is complete. Possible future ideas:
 
-- **Tree map view** — a visual size breakdown by folder alongside the flat table.
+- **Open in Explorer** — context action on a file/folder/tile to reveal it in Windows Explorer.
+- **Export** — save the scan or duplicate report to CSV/JSON.
